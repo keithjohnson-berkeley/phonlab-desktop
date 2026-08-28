@@ -1,7 +1,7 @@
 from PyQt6.QtCore import QObject, QThreadPool, pyqtSignal
 
-from core.job.job import Job
-from core.job.job_worker import JobWorker
+from core.base.job import Job
+from core.base.job_worker import JobWorker
 
 
 class JobManager:

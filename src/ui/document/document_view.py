@@ -15,6 +15,9 @@ from ui.document.component.spectrogram_plot import SpectrogramPlot
 from ui.document.document_view_model import DocumentViewModel
 from ui.document.state.audio_wave_state import AudioWaveState
 from ui.document.state.document_window_state import DocumentWindowState
+from ui.document.state.load_progress_state import LoadProgressState
+from ui.document.state.playback_state import PlaybackState
+from ui.document.state.plot_layout_state import PlotLayoutState
 from ui.document.state.select_state import SelectState
 from ui.document.state.sgram_state import SpectrogramState
 from ui.document.state.status_message_state import StatusMessageState
@@ -81,8 +84,6 @@ class DocumentView(QWidget):
         layout.addWidget(bottom_bar)
         self.setLayout(layout)
 
-        self.plot_type = 1
-
         # mouse interaction state
         self.mouse_pressed = False
         self.is_dragging = False
@@ -105,14 +106,35 @@ class DocumentView(QWidget):
             self.update_document_window(model)
         elif isinstance(model, StatusMessageState):
             self.message_label.setText(model.message)
+        elif isinstance(model, PlaybackState):
+            self.update_playback_cursor(model)
+        elif isinstance(model, LoadProgressState):
+            self.update_load_progress(model)
+        elif isinstance(model, PlotLayoutState):
+            self.update_plot_layout(model, self.view_model.raw_wave_state)
 
-    def load_audio(self, filename):
+    def load_audio(self, filename, options):
         """Load an audio file into this document"""
-        self.view_model.load_audio(filename)
+        self.view_model.load_audio(filename, options)
 
     def load_audio_wave_view(self, audio_wave: AudioWaveState):
         self.reset_slider(audio_wave.fs)
-        self.plot_wave(audio_wave)
+        self.update_plot_layout(self.view_model.plot_layout_state, self.view_model.raw_wave_state)
+
+    def _raw_window_bounds(self, start: int, end: int) -> tuple[int, int]:
+        """Convert a [start, end) sample range from the processed audio's
+        sample rate (used for scrolling/selection/spectrogram) into the
+        equivalent sample indices in the raw display audio, which may have
+        a different sample rate."""
+        proc_fs = self.view_model.audio_wave_state.fs
+        raw_wave = self.view_model.raw_wave_state
+        raw_len = len(raw_wave.x)
+        if proc_fs == 0 or raw_wave.fs == 0 or raw_len == 0:
+            return start, end
+        ratio = raw_wave.fs / proc_fs
+        raw_start = min(max(round(start * ratio), 0), raw_len - 1)
+        raw_end = min(max(round(end * ratio), 0), raw_len - 1)
+        return raw_start, raw_end
 
     def clear_plots(self):
         """Clear all current plots"""
@@ -125,18 +147,19 @@ class DocumentView(QWidget):
         self.selection_region_wave = None
         self.selection_region_spec = None
 
-    def create_wave_plot(self, row, col, audio_wave: AudioWaveState, rowspan=1):
+    def create_wave_plot(self, row, col, raw_wave: AudioWaveState, rowspan=1):
         """Create a waveform plot at the specified position"""
         start, end = (
             self.view_model.document_window_state.start,
             self.view_model.document_window_state.end,
         )
+        raw_start, raw_end = self._raw_window_bounds(start, end)
 
         wave_plot = AudioWavePlot()
         self.graphics_widget.addItem(wave_plot, row=row, col=col, rowspan=rowspan)
 
         wave_plot.plot_wave(
-            audio_wave.t, audio_wave.x, start, end, audio_wave.max_x, audio_wave.min_x
+            raw_wave.t, raw_wave.x, raw_start, raw_end, raw_wave.max_x, raw_wave.min_x
         )
 
         return wave_plot
@@ -146,42 +169,28 @@ class DocumentView(QWidget):
         scene = self.graphics_widget.scene()
         scene.sigMouseMoved.connect(self.on_mouse_moved)
 
-    def plot_wave(self, audio_wave: AudioWaveState | None = None):
-        """Display waveform only"""
-        if audio_wave is None:
-            audio_wave = self.view_model.audio_wave_state
+    def show_spectrogram(self, show: bool):
+        self.view_model.show_spectrogram(show)
 
-        self.plot_type = 1
+    def update_plot_layout(self, layout_state: PlotLayoutState, raw_wave: AudioWaveState):
         self.clear_plots()
 
-        self.wave_plot = self.create_wave_plot(0, 0, audio_wave)
+        self.wave_plot = self.create_wave_plot(0, 0, raw_wave)
 
-        self.wave_plot.setLabel("bottom", self.tr("Time"), units="s")
-        self.wave_plot.getAxis("bottom").setStyle(showValues=True)
+        if layout_state.is_spectrogram:
+            self.wave_plot.getAxis("bottom").setStyle(showValues=False)
+            self.wave_plot.getAxis("left").setWidth(60)
+    
+            self.spec_plot = SpectrogramPlot(linked_plot=self.wave_plot)
+            self.graphics_widget.addItem(self.spec_plot, row=1, col=0)
+            self.plot_spectrogram(self.view_model.sgram_state)
+            self.spec_plot.show()
 
-        self.connect_plot_signals()
-        self.update_selection_box(self.view_model.select_state)
-
-    def plot_wave_sgram(self):
-        """Display waveform and spectrogram"""
-        self.plot_type = 2
-        self.clear_plots()
-
-        self.wave_plot = self.create_wave_plot(
-            row=0, col=0, audio_wave=self.view_model.audio_wave_state
-        )
-
-        self.wave_plot.getAxis("bottom").setStyle(showValues=False)
-
-        self.wave_plot.getAxis("left").setWidth(60)
-
-        self.spec_plot = SpectrogramPlot(linked_plot=self.wave_plot)
-        self.graphics_widget.addItem(self.spec_plot, row=1, col=0)
-        self.plot_spectrogram(self.view_model.sgram_state)
-        self.spec_plot.show()
-
-        self.graphics_widget.ci.layout.setRowStretchFactor(0, 1)
-        self.graphics_widget.ci.layout.setRowStretchFactor(1, 2)
+            self.graphics_widget.ci.layout.setRowStretchFactor(0, 1)
+            self.graphics_widget.ci.layout.setRowStretchFactor(1, 2)
+        else:
+            self.wave_plot.setLabel("bottom", self.tr("Time"), units="s")
+            self.wave_plot.getAxis("bottom").setStyle(showValues=True)
 
         self.connect_plot_signals()
         self.update_selection_box(self.view_model.select_state)
@@ -197,8 +206,8 @@ class DocumentView(QWidget):
     def update_wave_y_range(self):
         """Update the y-axis range of the waveform plot based on scale factor"""
         max_x, min_x = (
-            self.view_model.audio_wave_state.max_x,
-            self.view_model.audio_wave_state.min_x,
+            self.view_model.raw_wave_state.max_x,
+            self.view_model.raw_wave_state.min_x,
         )
         if self.wave_plot:
             y_max = max(abs(min_x), abs(max_x))
@@ -277,18 +286,36 @@ class DocumentView(QWidget):
         else:
             box_left = xrange = 0
 
-        if self.spec_plot and self.plot_type == 2:
+        if self.spec_plot is not None:
             self.spec_plot.update_selection_region(box_left, xrange)
-        if self.wave_plot:
+        if self.wave_plot is not None:
             self.wave_plot.update_selection_region(box_left, xrange)
+
+    def update_playback_cursor(self, playback: PlaybackState):
+        if self.wave_plot:
+            self.wave_plot.set_cursor_position(playback.position, playback.is_playing)
+        if self.spec_plot:
+            self.spec_plot.set_cursor_position(playback.position, playback.is_playing)
+
+    def update_load_progress(self, progress: LoadProgressState):
+        self.progress_bar.setVisible(progress.is_loading)
+        if progress.is_loading:
+            self.progress_bar.setRange(0, 0)  # no known percentage, just "busy"
+            self.progress_bar.setFormat(self.tr("Loading full file…"))
+        else:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setFormat(self.tr("Computing %p%"))
 
     def update_document_window(self, doc_window: DocumentWindowState):
         start, end = doc_window.start, doc_window.end
-        t, x = self.view_model.audio_wave_state.t, self.view_model.audio_wave_state.x
         self.slider.setValue(start)
 
         if self.wave_plot:
-            self.wave_plot.update_wave(t[start:end], x[start:end], t[end])
+            raw_start, raw_end = self._raw_window_bounds(start, end)
+            raw_t, raw_x = self.view_model.raw_wave_state.t, self.view_model.raw_wave_state.x
+            self.wave_plot.update_wave(
+                raw_t[raw_start:raw_end], raw_x[raw_start:raw_end], raw_t[raw_end]
+            )
 
         self.view_model.compute_spectrogram()
         self.update_slider_page_step(doc_window)
@@ -320,11 +347,12 @@ class DocumentView(QWidget):
             if not self.is_dragging:
                 self.view_model.start_selection(x)
             else:
+                # continue_selection() sets its own "Select: ... to ..."
+                # status message; don't clobber it with the cursor position.
                 self.view_model.continue_selection(x)
             self.is_dragging = True
-
-        # Update status message
-        self.message_label.setText(status_msg)
+        else:
+            self.message_label.setText(status_msg)
 
     def eventFilter(self, obj, event):
         """Filter mouse events from the graphics widget"""
@@ -416,12 +444,20 @@ class DocumentView(QWidget):
                     return True
 
                 if abs(scroll_x) > abs(scroll_y):  # horizontal motion
-                    # if is_trackpad:
-                    #    scroll_fraction = -scroll_x * 0.002
-                    #    self.scroll_by_fraction(scroll_fraction)
+                    # A plain mouse wheel reports shift+scroll as horizontal
+                    # motion (angleDelta().x()) rather than vertical, so
+                    # this is where that gesture actually lands.
+                    if modifiers == Qt.KeyboardModifier.ShiftModifier:
+                        if scroll_x > 0:
+                            self.zoom_in(1.05)
+                        else:
+                            self.zoom_out(1.05)
+                    elif is_trackpad:
+                        scroll_fraction = -scroll_x * 0.002
+                        self.view_model.move_start_by_fraction(scroll_fraction)
                     # else:
                     #    scroll_fraction = -scroll_x * 0.1
-                    #    self.scroll_by_fraction(scroll_fraction)
+                    #    self.view_model.move_start_by_fraction(scroll_fraction)
                     return True
 
                 elif abs(scroll_y) > 0:  # vertical motion

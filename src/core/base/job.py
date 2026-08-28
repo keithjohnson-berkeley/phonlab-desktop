@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from core.usecase.use_case import UseCase
+from core.base.use_case import UseCase
 
 
 @dataclass

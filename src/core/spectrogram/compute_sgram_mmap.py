@@ -4,8 +4,8 @@ import tempfile
 import numpy as np
 
 import phonlab as phon
-from core.entity.spectrogram_mmap import SpectrogramMmap
-from core.usecase.use_case import UseCase
+from core.base.use_case import UseCase
+from core.spectrogram.entity.spectrogram_mmap import SpectrogramMmap
 
 
 class ComputeSpectrogramMmap(UseCase[SpectrogramMmap]):

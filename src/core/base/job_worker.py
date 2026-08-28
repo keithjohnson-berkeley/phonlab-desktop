@@ -1,6 +1,6 @@
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal, pyqtSlot
 
-from core.job.job import Job
+from core.base.job import Job
 
 
 class JobWorker(QRunnable):

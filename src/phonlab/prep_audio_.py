@@ -92,12 +92,13 @@ def prep_audio(x, fs, target_fs=32000, pre = 0, scale = True,
     if (pre > 0): y = np.append(x2[0], x2[1:] - pre * x2[:-1])  # apply pre-emphasis
     else: y = x2
     if scale: y = y/np.max(y) * 0.9  # scale to about full range
-    if add_tiny_noise:  y = y + ((np.random.rand(len(y)) - 0.5) * 0.00001)
-    if pad_to > 0: 
+    if add_tiny_noise:  y = y + (((np.random.rand(len(y)) - 0.5) * 0.00001).astype(y.dtype))
+    if pad_to > 0:
         # check whether any extra are needed
         extra_time = pad_to - ((len(y)/target_fs) % pad_to)
         extra_samples = int(extra_time * target_fs)
-        y = np.concatenate((y,(np.random.rand(extra_samples) - 0.5) * 0.00001))
+        pad_noise = ((np.random.rand(extra_samples) - 0.5) * 0.00001).astype(y.dtype)
+        y = np.concatenate((y, pad_noise))
         if not quiet:
             print(f"Prep Audio: Padding signal to {pad_to} sec, which involves adding {extra_samples} extra samples.")
     if outtype == "int":  y = np.rint(np.iinfo(np.int16).max * y).astype(np.int16)

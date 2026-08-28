@@ -15,7 +15,11 @@ jobs:
           python_ver: '3.12.10'
           spec: 'src/phonlab_desktop.py'
           requirements: 'requirements.txt'
-          options: --name "Phonlab", --windowed
+          options: --name "Phonlab", --windowed, --additional-hooks-dir=pyinstaller_hooks
+      - name: Warm Numba Cache
+        run: |
+          PHONLAB_WARMUP_ONLY=1 "${{steps.create-executable.outputs.executable_path}}/Phonlab.app/Contents/MacOS/Phonlab"
+        shell: bash
       - name: Create Installer
         run: |
           chmod +x ./script/create-phonlab-dmg.sh
@@ -41,7 +45,11 @@ jobs:
           python_ver: '3.12.10'
           spec: 'src/phonlab_desktop.py'
           requirements: 'requirements.txt'
-          options: --name "Phonlab", --windowed
+          options: --name "Phonlab", --windowed, --additional-hooks-dir=pyinstaller_hooks
+      - name: Warm Numba Cache
+        run: |
+          PHONLAB_WARMUP_ONLY=1 "${{steps.create-executable.outputs.executable_path}}/Phonlab.app/Contents/MacOS/Phonlab"
+        shell: bash
       - name: Create Installer
         run: |
           chmod +x ./script/create-phonlab-dmg.sh
@@ -57,12 +65,18 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Create Executable
+        id: create-executable
         uses: sayyid5416/pyinstaller@v1
         with:
           python_ver: '3.12.10'
           spec: 'src/phonlab_desktop.py'
           requirements: 'requirements.txt'
-          options: --name "Phonlab", --windowed
+          options: --name "Phonlab", --windowed, --additional-hooks-dir=pyinstaller_hooks
+      - name: Warm Numba Cache
+        shell: pwsh
+        run: |
+          $env:PHONLAB_WARMUP_ONLY = "1"
+          & "${{steps.create-executable.outputs.executable_path}}\Phonlab\Phonlab.exe"
       - name: Compile .ISS to .EXE Installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
@@ -84,7 +98,10 @@ jobs:
           python_ver: '3.12.10'
           spec: 'src/phonlab_desktop.py'
           requirements: 'requirements.txt'
-          options: --name "Phonlab", --windowed
+          options: --name "Phonlab", --windowed, --additional-hooks-dir=pyinstaller_hooks
+      - name: Warm Numba Cache
+        run: |
+          PHONLAB_WARMUP_ONLY=1 "${{steps.create-executable.outputs.executable_path}}/Phonlab/Phonlab"
       - name: Create tarball
         run: |
           tar -czvf phonlab.tar.gz  -C ${{steps.create-executable.outputs.executable_path}}/Phonlab .

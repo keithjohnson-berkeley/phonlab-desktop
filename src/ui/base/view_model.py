@@ -2,9 +2,9 @@ from collections.abc import Callable
 
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
-from core.job.job import Job
-from core.job.job_manager import JobManager
-from core.usecase.use_case import UseCase
+from core.base.job import Job
+from core.base.job_manager import JobManager
+from core.base.use_case import UseCase
 
 
 class ViewModel(QObject):
@@ -41,4 +41,8 @@ class ViewModel(QObject):
 
     def close_threads(self):
         for key in self.job_managers:
+            self.job_managers[key].quit()
+
+    def close_thread(self, key):
+        if key in self.job_managers:
             self.job_managers[key].quit()

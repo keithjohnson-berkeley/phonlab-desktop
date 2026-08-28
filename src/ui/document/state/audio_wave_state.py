@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from core.entity.audio_signal import AudioSignal
+from core.load_audio.entity.audio_signal import AudioSignal
 
 
 @dataclass
@@ -17,8 +17,12 @@ class AudioWaveState:
 
 def to_audio_wave_state(audio_signal: AudioSignal) -> AudioWaveState:
     x, fs = audio_signal.x, audio_signal.fs
-    min_x = np.min(x)
-    max_x = np.max(x)
+    # Cast to plain Python floats regardless of x's dtype (e.g. raw audio
+    # loads as float32 while processed audio comes out float64) — pyqtgraph
+    # mixes these into float64 view-range math and raises spurious
+    # "overflow encountered in cast" warnings when fed a float32 scalar.
+    min_x = float(np.min(x))
+    max_x = float(np.max(x))
     x_range = max_x - min_x
     t = np.arange(len(x)) / fs
 

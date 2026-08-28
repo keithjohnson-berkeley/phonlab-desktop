@@ -1,8 +1,8 @@
 import numpy as np
 
 import phonlab as phon
-from core.entity.spectrogram import Spectrogram
-from core.usecase.use_case import UseCase
+from core.base.use_case import UseCase
+from core.spectrogram.entity.spectrogram import Spectrogram
 
 
 class ComputeSpectrogram(UseCase[Spectrogram]):

@@ -1,63 +1,125 @@
 from dataclasses import replace
 
 import numpy as np
-import sounddevice as sd
 from PyQt6.QtCore import QTimer, pyqtSlot
 
 import phonlab as phon
-from core.entity.spectrogram import Spectrogram
-from core.entity.spectrogram_mmap import SpectrogramMmap
-from core.usecase.compute_sgram import ComputeSpectrogram
-from core.usecase.compute_sgram_mmap import ComputeSpectrogramMmap
-from core.usecase.load_audio import AudioSignal, LoadAudio
-from core.usecase.play_audio import PlayAudio
+from core.load_audio.entity.audio_document import AudioDocument
+from core.load_audio.entity.audio_open_options import AudioOpenOptions
+from core.load_audio.entity.audio_signal import AudioSignal
+from core.load_audio.load_audio import LoadAudio
+from core.play_audio.audio_player import AudioPlayer
+from core.play_audio.entity.playback_poll import PlaybackPoll
+from core.spectrogram.compute_sgram import ComputeSpectrogram
+from core.spectrogram.compute_sgram_mmap import ComputeSpectrogramMmap
+from core.spectrogram.entity.spectrogram import Spectrogram
+from core.spectrogram.entity.spectrogram_mmap import SpectrogramMmap
 from res.constants import MAX_SGRAM_LENGTH
 from ui.base.view_model import ViewModel
 from ui.document.state.audio_wave_state import AudioWaveState, to_audio_wave_state
 from ui.document.state.document_window_state import DocumentWindowState
+from ui.document.state.load_progress_state import LoadProgressState
+from ui.document.state.playback_state import PlaybackState
+from ui.document.state.plot_layout_state import PlotLayoutState
 from ui.document.state.select_state import SelectState
 from ui.document.state.sgram_state import SpectrogramState
 from ui.document.state.status_message_state import StatusMessageState
+
+LATENCY_WARNING_THRESHOLD_S = 0.1  # audacity's own reference for "robust" latency
 
 
 class DocumentViewModel(ViewModel):
     def __init__(self):
         super().__init__()
         self.audio_wave_state: AudioWaveState = AudioWaveState()
+        self.raw_wave_state: AudioWaveState = AudioWaveState()
+        self.audio_document: AudioDocument | None = None
         self.sgram_state: SpectrogramState = SpectrogramState()
         self.is_audio_playing = False
         self.select_state: SelectState = SelectState()
         self.document_window_state: DocumentWindowState = DocumentWindowState()
+        self.plot_layout_state: PlotLayoutState = PlotLayoutState()
+        self.playback_state = PlaybackState()
 
         self.click_timer: QTimer | None = None
 
-    def load_audio(self, filepath: str):
+        self.audio_player = AudioPlayer()
+
+    def load_audio(self, filepath: str, options: AudioOpenOptions):
+        # LoadAudio yields twice: a fast preview of the first window, then
+        # the fully loaded file once it's ready (which can take a while for
+        # a long recording). is_preview tracks which one this callback is
+        # currently handling.
+        is_preview = [True]
         @pyqtSlot(object)
-        def on_success(audio_signal: AudioSignal):
-            self.remove_selection()
+        def on_success(audio_document: AudioDocument):
+            preview = is_preview[0]
+            is_preview[0] = False
+
+            self.audio_document = audio_document
+            audio_signal = audio_document.channels[audio_document.primary_channel]
+
+            if audio_document.original_channels is not None:
+                raw_signal = AudioSignal(
+                    audio_document.original_channels[audio_document.primary_channel],
+                    audio_document.original_fs,
+                )
+            else:
+                # Preview yield: the unprocessed file hasn't been read yet,
+                # so fall back to the prepped preview signal for display.
+                raw_signal = audio_signal
+
+            if preview:
+                self.remove_selection()
 
             self.audio_wave_state = to_audio_wave_state(audio_signal)
+            self.raw_wave_state = to_audio_wave_state(raw_signal)
             self.state_changed.emit(self.audio_wave_state)
 
             signal_end = len(audio_signal.x) - 1
             window_end = min(signal_end, MAX_SGRAM_LENGTH * audio_signal.fs)
-            self.document_window_state = replace(
-                self.document_window_state,
-                start=0,
-                end=window_end,
-                max_start=(signal_end - window_end),
-            )
+            if preview:
+                # Nothing has loaded past the preview yet, so scrolling is
+                # capped to what's currently in memory.
+                self.document_window_state = replace(
+                    self.document_window_state,
+                    start=0,
+                    end=window_end,
+                    max_start=(signal_end - window_end),
+                )
+            else:
+                # Keep whatever the user is currently looking at; just
+                # widen how far they're now allowed to scroll.
+                self.document_window_state = replace(
+                    self.document_window_state,
+                    max_start=(signal_end - window_end),
+                )
             self.state_changed.emit(self.document_window_state)
 
-            msg = self.tr(
-                "Duration shown {:.3f} seconds, out of {:.3f} seconds"
-            ).format(
-                window_end / audio_signal.fs, len(audio_signal.x) / audio_signal.fs
-            )
-            self.state_changed.emit(StatusMessageState(msg))
+            self.state_changed.emit(LoadProgressState(is_loading=preview))
 
-        use_case = LoadAudio(filepath)
+            if not preview:
+                shown = (
+                    self.document_window_state.end - self.document_window_state.start
+                )
+                msg = self.tr(
+                    "Duration shown {:.3f} seconds, out of {:.3f} seconds"
+                ).format(shown / audio_signal.fs, len(audio_signal.x) / audio_signal.fs)
+                self.state_changed.emit(StatusMessageState(msg))
+
+        use_case = LoadAudio(
+            filepath,
+            target_fs=options.target_fs,
+            channel_mode=options.channel_mode,
+            retained_channels=options.retained_channels,
+            primary_channel=options.primary_channel,
+        )
         self.launch_use_case("load_audio", use_case, on_success, self.on_error)
+
+
+    def show_spectrogram(self, show: bool):
+        self.plot_layout_state = replace(self.plot_layout_state, is_spectrogram=show)
+        self.state_changed.emit(self.plot_layout_state)
 
     def compute_spectrogram(self):
         x, fs = self.audio_wave_state.x, self.audio_wave_state.fs
@@ -97,7 +159,7 @@ class DocumentViewModel(ViewModel):
             )
             self.state_changed.emit(self.sgram_state)
         else:
-            t, f, sxx = phon.compute_sgram(x[start:end], fs, 0.008, 0.003, 8)
+            t, f, sxx = phon.compute_sgram(x[start:end], fs, 0.008, 0.003, 9)
 
             self.sgram_state = replace(
                 self.sgram_state,
@@ -141,20 +203,31 @@ class DocumentViewModel(ViewModel):
                 "sgram_mmap", use_case, on_success, self.on_error, only_once=True
             )
 
-    def play_audio(self, x: np.ndarray, fs: int):
-        if self.is_audio_playing:
-            self.stop_audio()
+    def play_audio(self, x: np.ndarray, fs: int, start: int):
+        self.stop_audio()
 
         @pyqtSlot(object)
-        def on_success():
-            self.is_audio_playing = False
+        def on_poll(playback_poll: PlaybackPoll):
+            high_latency = playback_poll.latency > LATENCY_WARNING_THRESHOLD_S
 
-        use_case = PlayAudio(x, fs)
-        self.is_audio_playing = True
-        self.launch_use_case("play_audio", use_case, on_success, self.on_error)
+            if high_latency and not self.playback_state.high_latency:
+                msg = self.tr(
+                    "System audio latency is a little long ({:.0f} ms). Consider using a different audio device."
+                ).format(playback_poll.latency  * 1000)
+                self.state_changed.emit(StatusMessageState(msg))
+
+            self.playback_state = PlaybackState(playback_poll.is_playing, playback_poll.current_time, high_latency)
+            self.state_changed.emit(self.playback_state)
+
+        self.audio_player.playback_poll.connect(on_poll)
+        self.audio_player.play(x, fs, start / self.audio_wave_state.fs)
 
     def stop_audio(self):
-        sd.stop()
+        self.audio_player.stop()
+
+    def close_threads(self):
+        self.audio_player.stop()
+        super().close_threads()
 
     def go_back(self):
         window_size = self.document_window_state.end - self.document_window_state.start
@@ -302,14 +375,14 @@ class DocumentViewModel(ViewModel):
 
         if start != end:
             section = self.audio_wave_state.x[start:end]
-            self.play_audio(section, self.audio_wave_state.fs)
+            self.play_audio(section, self.audio_wave_state.fs, start=start)
 
     def play_visible_audio(self):
         start, end = self.document_window_state.start, self.document_window_state.end
 
         if len(self.audio_wave_state.x) > 0:
             section = self.audio_wave_state.x[start:end]
-            self.play_audio(section, self.audio_wave_state.fs)
+            self.play_audio(section, self.audio_wave_state.fs, start=start)
 
     @pyqtSlot(object)
     def on_error(self, err):

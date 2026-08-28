@@ -1,14 +1,11 @@
-# from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files
 
-# datas = collect_data_files('phonlab')
+datas = collect_data_files('phonlab')
 
 hiddenimports = [
-    # "phonlab",
-    # "phonlab.acoustic.sgram_",
-    # "phonlab.acoustic.tidypraat",
-    # "phonlab.utils.prep_audio_",
-    # "phonlab.utils.signal",
-    "phonlab.load_sig_",
-    "phonlab.prep_audio_",
-    "phonlab.sgram_",
+    "phonlab",
+    "phonlab.acoustic.sgram_",
+    "phonlab.acoustic.tidypraat",
+    "phonlab.utils.prep_audio_",
+    "phonlab.utils.signal",
 ]

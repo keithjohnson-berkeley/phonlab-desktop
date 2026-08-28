@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 
 from ui.document.document_view import DocumentView
 from ui.document.document_view_model import DocumentViewModel
+from ui.main.open_audio_dialog import OpenAudioDialog
 
 
 class MainWindow(QMainWindow):
@@ -155,6 +156,10 @@ class MainWindow(QMainWindow):
             filename, _ = QFileDialog.getOpenFileName(self, filter=self.filters)
 
         if filename:
+            options = OpenAudioDialog.get_options(filename, self)
+            if options is None:
+                return
+
             if self.splash is not None:
                 self.splash.close()
                 self.splash = None
@@ -169,7 +174,7 @@ class MainWindow(QMainWindow):
             self.tab_widget.setTabToolTip(index, filename)
 
             # Load the audio file
-            doc.load_audio(filename)
+            doc.load_audio(filename, options)
 
     def close_tab(self, index):
         """Close a tab"""
@@ -191,12 +196,12 @@ class MainWindow(QMainWindow):
     def plot_wave(self):
         doc = self.get_current_document()
         if doc:
-            doc.plot_wave()
+            doc.show_spectrogram(False)
 
     def plot_wave_sgram(self):
         doc = self.get_current_document()
         if doc:
-            doc.plot_wave_sgram()
+            doc.show_spectrogram(True)
 
     def show_all(self):
         doc = self.get_current_document()
