@@ -10,6 +10,8 @@ TIER_FONTS_KEY = "tier_fonts"
 
 # -- Files --
 PROJECT_DATABASE_FILENAME = "phonlab.db"
+# Opening either of these opens the directory that holds it as a project
+PROJECT_MARKER_FILES = (PROJECT_FILE_NAME, PROJECT_DATABASE_FILENAME)
 
 # -- Mouse --
 # Two clicks closer together than this are a double-click. The system's setting is

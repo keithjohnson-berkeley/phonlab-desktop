@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from PyQt6.QtWidgets import QComboBox
+import pytest
+from PyQt6.QtWidgets import QComboBox, QDialog
 from pytestqt.qtbot import QtBot
 
 from ui.main.component.open_path_dialog import OpenPathDialog
@@ -12,18 +13,6 @@ def make_dialog(qtbot: QtBot, directory: Path) -> OpenPathDialog:
     return dialog
 
 
-def test_accepts_a_selected_directory(qtbot: QtBot, tmp_path: Path):
-    project = tmp_path / "project"
-    project.mkdir()
-    dialog = make_dialog(qtbot, tmp_path)
-    dialog.selectFile(str(project))
-
-    dialog.accept()
-
-    assert dialog.result() == OpenPathDialog.DialogCode.Accepted
-    assert dialog.selectedFiles() == [str(project)]
-
-
 def test_accepts_selected_files(qtbot: QtBot, tmp_path: Path):
     wav = tmp_path / "sound.wav"
     wav.write_bytes(b"")
@@ -32,37 +21,93 @@ def test_accepts_selected_files(qtbot: QtBot, tmp_path: Path):
 
     dialog.accept()
 
-    assert dialog.result() == OpenPathDialog.DialogCode.Accepted
+    assert dialog.result() == QDialog.DialogCode.Accepted
     assert dialog.selectedFiles() == [str(wav)]
 
 
-def test_shows_a_selected_directory_as_the_project_in_the_name_box(
-    qtbot: QtBot, tmp_path: Path
-):
-    (tmp_path / "project").mkdir()
+def test_opening_a_directory_shows_what_is_in_it(qtbot: QtBot, tmp_path: Path):
+    folder = tmp_path / "corpus"
+    folder.mkdir()
     dialog = make_dialog(qtbot, tmp_path)
-    dialog.show()
+    dialog.selectFile(str(folder))
 
-    dialog.selectFile(str(tmp_path / "project"))
+    dialog.accept()
 
-    assert dialog.name_edit is not None and dialog.name_edit.text() == "project"
-    assert dialog.name_label is not None
-    assert dialog.name_label.text().replace("&", "") == "Project:"
+    assert dialog.result() != QDialog.DialogCode.Accepted
+    assert dialog.project_dir is None
+    assert dialog.directory().absolutePath() == str(folder)
 
 
-def test_labels_the_name_box_as_a_file_name_for_a_file(qtbot: QtBot, tmp_path: Path):
-    (tmp_path / "project").mkdir()
+def test_offers_a_button_to_open_the_folder_as_a_project(qtbot: QtBot, tmp_path: Path):
+    dialog = make_dialog(qtbot, tmp_path)
+
+    assert dialog.open_project_btn is not None
+    assert dialog.open_project_btn.text() == "Open Folder as Project"
+
+
+def test_button_chooses_the_folder_being_shown(qtbot: QtBot, tmp_path: Path):
+    folder = tmp_path / "corpus"
+    folder.mkdir()
+    dialog = make_dialog(qtbot, tmp_path)
+    dialog.setDirectory(str(folder))
+
+    assert dialog.open_project_btn is not None
+    dialog.open_project_btn.click()
+
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    assert dialog.project_dir == str(folder)
+
+
+def test_button_chooses_the_selected_folder(qtbot: QtBot, tmp_path: Path):
+    folder = tmp_path / "corpus"
+    folder.mkdir()
+    dialog = make_dialog(qtbot, tmp_path)
+    dialog.selectFile(str(folder))
+
+    assert dialog.open_project_btn is not None
+    dialog.open_project_btn.click()
+
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    assert dialog.project_dir == str(folder)
+
+
+def test_get_paths_returns_the_project_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    def fake_exec(self: OpenPathDialog) -> QDialog.DialogCode:
+        self.setDirectory(str(tmp_path))
+        self.open_folder_as_project()
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(OpenPathDialog, "exec", fake_exec)
+
+    assert OpenPathDialog.get_paths(None, "Open", str(tmp_path)) == [str(tmp_path)]
+
+
+def test_get_paths_returns_the_selected_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
     wav = tmp_path / "sound.wav"
     wav.write_bytes(b"")
-    dialog = make_dialog(qtbot, tmp_path)
-    dialog.show()
-    dialog.selectFile(str(tmp_path / "project"))
 
-    dialog.selectFile(str(wav))
+    def fake_exec(self: OpenPathDialog) -> QDialog.DialogCode:
+        self.selectFile(str(wav))
+        self.accept()
+        return QDialog.DialogCode.Accepted
 
-    assert dialog.name_edit is not None and dialog.name_edit.text() == "sound.wav"
-    assert dialog.name_label is not None
-    assert dialog.name_label.text().replace("&", "") == "File name:"
+    monkeypatch.setattr(OpenPathDialog, "exec", fake_exec)
+
+    assert OpenPathDialog.get_paths(None, "Open", str(tmp_path)) == [str(wav)]
+
+
+def test_get_paths_is_empty_when_cancelled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setattr(
+        OpenPathDialog, "exec", lambda self: QDialog.DialogCode.Rejected
+    )
+
+    assert OpenPathDialog.get_paths(None, "Open", str(tmp_path)) == []
 
 
 def test_hides_the_file_type_filter(qtbot: QtBot, tmp_path: Path):

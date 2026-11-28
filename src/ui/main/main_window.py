@@ -23,6 +23,7 @@ from core.project.scan_project_files import (
 )
 from core.settings.app_settings import settings
 from phonlab_project.metadata import MetadataTarget
+from res.constants import PROJECT_MARKER_FILES
 from ui.annotation.component.tier_display_dialog import TierDisplayDialog
 from ui.annotation.component.tier_font_dialog import TierFontDialog
 from ui.annotation.component.tier_search_dialog import TierSearchDialog
@@ -80,7 +81,7 @@ class MainWindow(QMainWindow):
 
         self.filters = (
             "Sound files and annotations (*.wav *.WAV *.TextGrid *.textgrid "
-            "*.TEXTGRID *.eaf *.srt *.cha)"
+            f"*.TEXTGRID *.eaf *.srt *.cha {' '.join(PROJECT_MARKER_FILES)})"
         )
         self.splash = None
         self.progress_dialog: QProgressDialog | None = None
@@ -970,10 +971,13 @@ class MainWindow(QMainWindow):
             self.database_dialog = None
 
     def open_paths(self, paths: list[str]):
-        """Open what the user chose: a lone directory is a project, anything else is
-        the sound file (and its TextGrid) of a document"""
+        """Open what the user chose: a lone directory, or a project's phonlab.toml or
+        phonlab.db file, is a project; anything else is the sound file (and its
+        TextGrid) of a document"""
         if len(paths) == 1 and Path(paths[0]).is_dir():
             self.open_project(paths[0])
+        elif len(paths) == 1 and Path(paths[0]).name in PROJECT_MARKER_FILES:
+            self.open_project(str(Path(paths[0]).parent))
         else:
             self.open_single_document(paths, self.view_model.dir_path)
 

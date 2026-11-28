@@ -523,6 +523,30 @@ def test_select_project_builds_database_from_textgrids_before_opening_files(
     assert a is not None and [type.type for type in a.types] == ["word"]
 
 
+@pytest.mark.parametrize("marker", ["phonlab.toml", "phonlab.db"])
+def test_opening_a_project_file_opens_its_folder_as_a_project(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    opened: list,
+    project_repository: SeedableAnnotationRepository,
+    marker: str,
+):
+    make_project(tmp_path, "a.wav", database=True)
+    patch_open_dialog(monkeypatch, [str(tmp_path / marker)])
+
+    main_window.select_path_to_open()
+
+    assert opened == [
+        ([OpenableFile("a", str(tmp_path / "a.wav"), None)], str(tmp_path))
+    ]
+
+
+def test_the_open_dialog_lists_project_files(main_window: MainWindow):
+    assert "phonlab.toml" in main_window.filters
+    assert "phonlab.db" in main_window.filters
+
+
 def test_select_project_with_existing_database_opens_without_reading_textgrids(
     main_window: MainWindow,
     monkeypatch: pytest.MonkeyPatch,
